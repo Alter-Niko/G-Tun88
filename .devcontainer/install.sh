@@ -71,39 +71,162 @@ cat > /usr/local/bin/print-configs.sh << SCRIPT
 #!/bin/sh
 UUID=\$(grep -o '"id": *"[^"]*"' /etc/config.json | grep -o '[0-9a-f-]\{36\}')
 SNI="\${CODESPACE_NAME}-443.app.github.dev"
-IRAN_TIME=\$(TZ='Asia/Tehran' date +'%H:%M')
+IRAN_TIME=\$(TZ='Asia/Tehran' date +'%b %d • %a | %H:%M')
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "🎮 G-Tunnel GAMING CONFIGS"
+echo "🎮 G-Tun88 CONFIGS"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
-echo "vless://\${UUID}@63.141.252.203:443?encryption=none&security=tls&type=ws&sni=\${SNI}&path=%2Flive-chat# US1 - \${IRAN_TIME}"
+echo "vless://\${UUID}@20.85.77.48:443?encryption=none&security=tls&type=ws&sni=\${SNI}&path=%2Flive-chat# Moe Waffen Shangool - \${IRAN_TIME}"
 echo ""
-echo "vless://\${UUID}@142.54.178.211:443?encryption=none&security=tls&type=ws&sni=\${SNI}&path=%2Flive-chat# US2 - \${IRAN_TIME}"
+echo "vless://\${UUID}@20.120.56.11:443?encryption=none&security=tls&type=ws&sni=\${SNI}&path=%2Flive-chat# Liberty Cap Mangool - \${IRAN_TIME}"
 echo ""
-echo "vless://\${UUID}@204.12.196.34:443?encryption=none&security=tls&type=ws&sni=\${SNI}&path=%2Flive-chat# US3 - \${IRAN_TIME}"
-echo ""
-echo "vless://\${UUID}@50.7.87.2:443?encryption=none&security=tls&type=ws&sni=\${SNI}&path=%2Flive-chat# DE1 - \${IRAN_TIME}"
-echo ""
-echo "vless://\${UUID}@50.7.87.5:443?encryption=none&security=tls&type=ws&sni=\${SNI}&path=%2Flive-chat# DE2 - \${IRAN_TIME}"
-echo ""
-echo "vless://\${UUID}@50.7.87.4:443?encryption=none&security=tls&type=ws&sni=\${SNI}&path=%2Flive-chat# DE3 - \${IRAN_TIME}"
-echo ""
-echo "vless://\${UUID}@138.201.54.122:443?encryption=none&security=tls&type=ws&sni=\${SNI}&path=%2Flive-chat# DE4 - \${IRAN_TIME}"
-echo ""
-echo "vless://\${UUID}@94.130.50.12:443?encryption=none&security=tls&type=ws&sni=\${SNI}&path=%2Flive-chat# DE5 - \${IRAN_TIME}"
-echo ""
-echo "vless://\${UUID}@94.130.13.19:443?encryption=none&security=tls&type=ws&sni=\${SNI}&path=%2Flive-chat# DE6 - \${IRAN_TIME}"
-echo ""
-echo "vless://\${UUID}@50.7.87.3:443?encryption=none&security=tls&type=ws&sni=\${SNI}&path=%2Flive-chat# DE7 - \${IRAN_TIME}"
-echo ""
-echo "vless://\${UUID}@85.10.207.48:443?encryption=none&security=tls&type=ws&sni=\${SNI}&path=%2Flive-chat# DE8 - \${IRAN_TIME}"
+echo "vless://\${UUID}@20.207.70.99:443?encryption=none&security=tls&type=ws&sni=\${SNI}&path=%2Flive-chat# Hexe Habe Angoor - \${IRAN_TIME}"
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 SCRIPT
 
 chmod +x /usr/local/bin/print-configs.sh
 
-# Print configs at end of install
+# ── Keepalive script (written to disk for tmux to run) ─────────────
+# This is baked in at image-build time so g-tun.sh can reference it
+# immediately without needing to write it at runtime.
+cat > /usr/local/bin/gtun-keepalive.sh << 'KAEOF'
+#!/bin/bash
+i=0
+while true; do
+    i=$(( i + 1 ))
+    printf "\r[G-Tun] Keepalive tick: %d" "$i"
+    # Every 60 ticks (~60 s) ping GitHub to simulate network activity
+    (( i % 60 == 0 )) && curl -s -m 4 https://github.com >/dev/null 2>&1
+    sleep 1
+done
+KAEOF
+chmod +x /usr/local/bin/gtun-keepalive.sh
+
+# ── Background-tasks script ────────────────────────────────────────
+# Runs every 60 s inside a disowned bash process to:
+#   1. Re-expose port 443 as public (GitHub can silently reset it)
+#   2. Watchdog-restart xray if it has crashed
+cat > /usr/local/bin/gtun-bg-tasks.sh << 'BGEOF'
+#!/bin/bash
+set +e
+XRAY_BIN="/usr/local/bin/xray"
+XRAY_CONF="/etc/config.json"
+XRAY_LOG="/tmp/xray.log"
+PORT=443
+
+while true; do
+    sleep 60
+
+    # 1 – Re-expose port as public (silently; gh CLI must be authed)
+    if command -v gh >/dev/null 2>&1 && [[ -n "${CODESPACE_NAME:-}" ]]; then
+        GH_PROMPT_DISABLED=1 GH_NO_UPDATE_NOTIFIER=1 NO_COLOR=1 GH_FORCE_TTY=0 \
+            gh codespace ports visibility "${PORT}:public" -c "$CODESPACE_NAME" \
+            </dev/null >/dev/null 2>&1 || true
+    fi
+
+    # 2 – Watchdog: restart xray if not running
+    if ! pgrep -x xray >/dev/null 2>&1; then
+        sudo /usr/local/bin/xray -c "$XRAY_CONF" >>"$XRAY_LOG" 2>&1 &
+        sleep 3
+        # Re-expose after restart in case timing matters
+        if command -v gh >/dev/null 2>&1 && [[ -n "${CODESPACE_NAME:-}" ]]; then
+            GH_PROMPT_DISABLED=1 GH_NO_UPDATE_NOTIFIER=1 NO_COLOR=1 GH_FORCE_TTY=0 \
+                gh codespace ports visibility "${PORT}:public" -c "$CODESPACE_NAME" \
+                </dev/null >/dev/null 2>&1 || true
+        fi
+    fi
+done
+BGEOF
+chmod +x /usr/local/bin/gtun-bg-tasks.sh
+
+# ── Main g-tun.sh launcher ─────────────────────────────────────────
+cat > /usr/local/bin/g-tun.sh << 'MAINEOF'
+#!/bin/bash
+# G-Tun88 auto keep-alive launcher
+# Called by postStartCommand (--silent-start) and postAttachCommand (normal)
+
+set -euo pipefail
+
+XRAY_BIN="/usr/local/bin/xray"
+XRAY_CONF="/etc/config.json"
+XRAY_LOG="/tmp/xray.log"
+PORT=443
+BG_PID_FILE="/tmp/gtun_bg.pid"
+TMUX_SESSION="gtun_keepalive"
+
+# ── Helpers ────────────────────────────────────────────────────────
+
+xray_running() {
+    pgrep -x xray >/dev/null 2>&1
+}
+
+expose_port() {
+    command -v gh >/dev/null 2>&1 || return 0
+    [[ -z "${CODESPACE_NAME:-}" ]] && return 0
+    GH_PROMPT_DISABLED=1 GH_NO_UPDATE_NOTIFIER=1 NO_COLOR=1 GH_FORCE_TTY=0 \
+        gh codespace ports visibility "${PORT}:public" -c "$CODESPACE_NAME" \
+        </dev/null >/dev/null 2>&1 || true
+}
+
+start_xray() {
+    xray_running && return 0
+    sudo "$XRAY_BIN" -c "$XRAY_CONF" >>"$XRAY_LOG" 2>&1 &
+    sleep 2
+}
+
+# ── Anti-sleep tmux engine ─────────────────────────────────────────
+enable_anti_sleep() {
+    tmux has-session -t "$TMUX_SESSION" 2>/dev/null && return 0
+    tmux new-session -d -s "$TMUX_SESSION" \
+        "bash /usr/local/bin/gtun-keepalive.sh" 2>/dev/null || true
+}
+
+# ── Background watchdog/port-refresh loop ─────────────────────────
+start_background_tasks() {
+    # Guard: don't spawn a second copy if one is already alive
+    if [[ -f "$BG_PID_FILE" ]]; then
+        local pid
+        pid=$(cat "$BG_PID_FILE" 2>/dev/null || true)
+        [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null && return 0
+    fi
+    bash /usr/local/bin/gtun-bg-tasks.sh </dev/null >/dev/null 2>&1 &
+    printf '%s\n' $! > "$BG_PID_FILE"
+    disown 2>/dev/null || true
+}
+
+# ── Silent-start mode (postStartCommand) ──────────────────────────
+# Runs before the user attaches. Starts xray + background systems
+# quietly so everything is live by the time the terminal opens.
+if [[ "${1:-}" == "--silent-start" ]]; then
+    start_xray
+    expose_port
+    start_background_tasks
+    enable_anti_sleep
+    exit 0
+fi
+
+# ── Normal attach mode (postAttachCommand) ─────────────────────────
+# Ensure xray is up (it should be from silent-start, but be safe),
+# expose port, start background tasks if not already running,
+# then print configs for the user.
+
+# Wait briefly for the environment to stabilise
+echo "[G-Tunnel] Environment ready. Starting keep-alive systems..."
+
+start_xray
+expose_port
+start_background_tasks
+enable_anti_sleep
+
+echo "[G-Tunnel] ✔ Xray running | Port public | Watchdog active | Anti-sleep active"
+echo ""
+
+/usr/local/bin/print-configs.sh
+MAINEOF
+chmod +x /usr/local/bin/g-tun.sh
+
+# Print configs at end of install (UUID was just written above)
 /usr/local/bin/print-configs.sh
